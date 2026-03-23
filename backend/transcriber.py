@@ -2,6 +2,9 @@ import subprocess
 import tempfile
 import os
 from typing import Callable, List, Dict, Any
+from logger import get_logger
+
+log = get_logger("transcriber")
 
 
 def extract_audio(video_path: str) -> str:
@@ -25,21 +28,27 @@ def extract_audio(video_path: str) -> str:
         tmp_path
     ]
 
+    log.info("提取音频: %s → %s", video_path, tmp_path)
     try:
         result = subprocess.run(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            timeout=600  # 10 minute timeout for large files
+            timeout=600
         )
         if result.returncode != 0:
             error_msg = result.stderr.decode("utf-8", errors="replace")
+            log.error("ffmpeg 音频提取失败:\n%s", error_msg)
             raise RuntimeError(f"ffmpeg audio extraction failed: {error_msg}")
     except subprocess.TimeoutExpired:
+        log.error("音频提取超时 (>10分钟): %s", video_path)
         raise RuntimeError("Audio extraction timed out (>10 minutes)")
     except FileNotFoundError:
+        log.error("ffmpeg 未找到")
         raise RuntimeError("ffmpeg not found. Please install ffmpeg and ensure it is in PATH.")
 
+    size_mb = os.path.getsize(tmp_path) / 1024 / 1024
+    log.info("音频提取完成，大小: %.1f MB", size_mb)
     return tmp_path
 
 
@@ -58,12 +67,13 @@ def transcribe(
         raise RuntimeError("faster-whisper is not installed. Run: pip install faster-whisper")
 
     progress_callback(5.0, "加载语音识别模型...")
+    log.info("加载 Whisper medium 模型 (首次运行需下载约 1.5GB)")
 
-    # Use medium model for good Chinese accuracy
-    # device="cpu" with int8 for broad compatibility; use "cuda" if GPU available
     try:
         model = WhisperModel("medium", device="cpu", compute_type="int8")
+        log.info("Whisper 模型加载完成")
     except Exception as e:
+        log.error("Whisper 模型加载失败: %s", e)
         raise RuntimeError(f"Failed to load Whisper model: {e}")
 
     progress_callback(15.0, "开始转录...")
@@ -91,5 +101,6 @@ def transcribe(
         pct = min(pct, 90.0)
         progress_callback(pct, f"转录中... {seg.end:.1f}s / {duration:.1f}s")
 
+    log.info("转录完成，共 %d 段，音频时长 %.1fs", len(segments), duration)
     progress_callback(95.0, "转录完成，正在整理...")
     return segments

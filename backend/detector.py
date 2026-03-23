@@ -1,5 +1,8 @@
 import difflib
 from typing import List, Dict, Any
+from logger import get_logger
+
+log = get_logger("detector")
 
 
 # Keywords that indicate a bad take / need to redo
@@ -83,4 +86,7 @@ def detect_duplicates(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         else:
             seg["selected"] = True
 
+    kw_count = sum(1 for s in segments if s["is_keyword_marked"])
+    dup_count = sum(1 for s in segments if s["is_duplicate"])
+    log.info("检测完成: 总 %d 段，关键词标记 %d 段，相似重复 %d 段", n, kw_count, dup_count)
     return segments

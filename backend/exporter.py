@@ -2,6 +2,9 @@ import subprocess
 import tempfile
 import os
 from typing import List, Dict, Any, Callable
+from logger import get_logger
+
+log = get_logger("exporter")
 
 
 def export_video(
@@ -26,6 +29,7 @@ def export_video(
     selected = [s for s in segments if s.get("selected", False)]
     selected.sort(key=lambda s: s["start"])
 
+    log.info("导出开始: %d 段已选，输出 → %s", len(selected), output_path)
     if not selected:
         raise ValueError("没有选中任何片段，无法导出。")
 
@@ -67,6 +71,7 @@ def export_video(
             )
             if result.returncode != 0:
                 err = result.stderr.decode("utf-8", errors="replace")
+                log.error("ffmpeg 片段提取失败 (segment %d):\n%s", idx, err)
                 raise RuntimeError(f"ffmpeg segment extraction failed (segment {idx}): {err}")
 
             pct = 5.0 + (idx + 1) / total_segments * 70.0
@@ -104,8 +109,10 @@ def export_video(
         )
         if result.returncode != 0:
             err = result.stderr.decode("utf-8", errors="replace")
+            log.error("ffmpeg concat 失败:\n%s", err)
             raise RuntimeError(f"ffmpeg concat failed: {err}")
 
+        log.info("导出成功: %s", output_path)
         progress_callback(98.0, "导出完成，清理临时文件...")
 
     finally:

@@ -6,7 +6,7 @@ import subprocess
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -14,6 +14,9 @@ from pydantic import BaseModel
 from transcriber import extract_audio, transcribe
 from detector import detect_duplicates
 from exporter import export_video
+from logger import get_logger
+
+log = get_logger("main")
 
 
 # ---------------------------------------------------------------------------
@@ -26,14 +29,15 @@ tasks: Dict[str, Dict[str, Any]] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: check ffmpeg
     result = subprocess.run(["ffmpeg", "-version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode != 0:
-        print("WARNING: ffmpeg not found. Please install: brew install ffmpeg")
+        log.warning("ffmpeg 未找到，请先安装: brew install ffmpeg")
     else:
         version_line = result.stdout.decode("utf-8", errors="replace").split("\n")[0]
-        print(f"ffmpeg OK: {version_line}")
+        log.info("ffmpeg 就绪: %s", version_line)
+    log.info("视频粗剪助手后端启动")
     yield
+    log.info("视频粗剪助手后端关闭")
 
 
 app = FastAPI(title="视频粗剪助手 API", version="1.0.0", lifespan=lifespan)
@@ -93,16 +97,19 @@ async def run_process_task(task_id: str, file_path: str):
     task = tasks[task_id]
     task["status"] = "processing"
     audio_path = None
+    log.info("[%s] 开始处理任务，文件: %s", task_id[:8], file_path)
 
     def progress_cb(pct: float, step: str):
         task["progress"] = pct
         task["step"] = step
+        log.debug("[%s] %.1f%% - %s", task_id[:8], pct, step)
 
     try:
         # Step 1: Extract audio
         progress_cb(1.0, "提取音频中...")
         loop = asyncio.get_event_loop()
         audio_path = await loop.run_in_executor(None, extract_audio, file_path)
+        log.info("[%s] 音频提取完成: %s", task_id[:8], audio_path)
         progress_cb(10.0, "音频提取完成，开始转录...")
 
         # Step 2: Transcribe
@@ -110,6 +117,7 @@ async def run_process_task(task_id: str, file_path: str):
             return transcribe(audio_path, progress_cb)
 
         raw_segments = await loop.run_in_executor(None, do_transcribe)
+        log.info("[%s] 转录完成，共 %d 段", task_id[:8], len(raw_segments))
         progress_cb(92.0, "转录完成，分析片段...")
 
         # Step 3: Detect duplicates / NG takes
@@ -117,10 +125,10 @@ async def run_process_task(task_id: str, file_path: str):
             return detect_duplicates(raw_segments)
 
         segments = await loop.run_in_executor(None, do_detect)
+        bad = sum(1 for s in segments if s["is_duplicate"] or s["is_keyword_marked"])
+        log.info("[%s] 检测完成，共 %d 段，其中疑似坏镜 %d 段", task_id[:8], len(segments), bad)
 
-        # Get video duration from last segment end time
         duration = segments[-1]["end"] if segments else 0.0
-
         progress_cb(100.0, "分析完成！")
         task["result"] = {
             "segments": segments,
@@ -128,12 +136,13 @@ async def run_process_task(task_id: str, file_path: str):
             "audio_path": audio_path,
         }
         task["status"] = "done"
+        log.info("[%s] 任务完成，视频时长 %.1fs", task_id[:8], duration)
 
     except Exception as e:
+        log.exception("[%s] 处理任务异常: %s", task_id[:8], e)
         task["status"] = "error"
         task["error"] = str(e)
         task["step"] = f"错误: {e}"
-        # Clean up audio file on error
         if audio_path and os.path.exists(audio_path):
             try:
                 os.remove(audio_path)
@@ -145,10 +154,13 @@ async def run_export_task(task_id: str, file_path: str, segments: List[Dict], ou
     """Background task: export video with selected segments."""
     task = tasks[task_id]
     task["status"] = "processing"
+    kept = sum(1 for s in segments if s.get("selected"))
+    log.info("[%s] 开始导出，保留 %d 段，输出: %s", task_id[:8], kept, output_path)
 
     def progress_cb(pct: float, step: str):
         task["progress"] = pct
         task["step"] = step
+        log.debug("[%s] 导出 %.1f%% - %s", task_id[:8], pct, step)
 
     try:
         loop = asyncio.get_event_loop()
@@ -159,8 +171,10 @@ async def run_export_task(task_id: str, file_path: str, segments: List[Dict], ou
         await loop.run_in_executor(None, do_export)
         task["status"] = "done"
         task["output_path"] = output_path
+        log.info("[%s] 导出完成: %s", task_id[:8], output_path)
 
     except Exception as e:
+        log.exception("[%s] 导出任务异常: %s", task_id[:8], e)
         task["status"] = "error"
         task["error"] = str(e)
         task["step"] = f"导出错误: {e}"
@@ -174,18 +188,20 @@ async def run_export_task(task_id: str, file_path: str, segments: List[Dict], ou
 async def process_video(req: ProcessRequest, background_tasks: BackgroundTasks):
     """Start processing a video file. Returns task_id immediately."""
     if not os.path.isfile(req.file_path):
+        log.warning("文件不存在: %s", req.file_path)
         raise HTTPException(status_code=400, detail=f"文件不存在: {req.file_path}")
 
     ext = os.path.splitext(req.file_path)[1].lower()
     allowed = {".mp4", ".mov", ".mkv", ".avi", ".m4v", ".wmv", ".flv", ".webm"}
     if ext not in allowed:
+        log.warning("不支持的文件格式: %s", ext)
         raise HTTPException(status_code=400, detail=f"不支持的文件格式: {ext}")
 
     task_id = str(uuid.uuid4())
     tasks[task_id] = make_task("process")
+    log.info("创建处理任务 [%s]: %s", task_id[:8], req.file_path)
 
     background_tasks.add_task(run_process_task, task_id, req.file_path)
-
     return {"task_id": task_id}
 
 
@@ -218,22 +234,22 @@ async def get_task_status(task_id: str):
 async def export_video_endpoint(req: ExportRequest, background_tasks: BackgroundTasks):
     """Start exporting the edited video. Returns task_id immediately."""
     if not os.path.isfile(req.file_path):
+        log.warning("导出源文件不存在: %s", req.file_path)
         raise HTTPException(status_code=400, detail=f"源文件不存在: {req.file_path}")
 
     selected_count = sum(1 for s in req.segments if s.selected)
     if selected_count == 0:
+        log.warning("导出请求没有选中任何片段")
         raise HTTPException(status_code=400, detail="没有选中任何片段")
 
     task_id = str(uuid.uuid4())
     tasks[task_id] = make_task("export")
+    log.info("创建导出任务 [%s]: %d 段 → %s", task_id[:8], selected_count, req.output_path)
 
-    # Convert Pydantic models to plain dicts for the background task
     segments_dicts = [s.model_dump() for s in req.segments]
-
     background_tasks.add_task(
         run_export_task, task_id, req.file_path, segments_dicts, req.output_path
     )
-
     return {"task_id": task_id}
 
 
