@@ -203,7 +203,7 @@ export default function FileSelector({ onProcess }) {
             </div>
             {[
               'AI 自动识别废片镜头和重复内容',
-              '处理时间取决于视频时长（每小时约 5–15 分钟）',
+              '处理时间取决于视频时长（每小时的视频需约 5–15 分钟）',
               '导出使用无损复制，不降低画质',
               '请确保系统已安装 ffmpeg',
             ].map((tip, i) => (
