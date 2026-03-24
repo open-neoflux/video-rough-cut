@@ -52,13 +52,19 @@ def export_video(
             end = seg["end"]
             duration = end - start
 
+            # Two-pass seek: coarse input seek (fast) + fine output seek (accurate)
+            pre_roll = 4.0
+            safe_start = max(0.0, start - pre_roll)
+            fine_offset = start - safe_start
+
             cmd = [
                 "ffmpeg",
                 "-y",
-                "-ss", str(start),
+                "-ss", str(safe_start),   # fast coarse seek via input seek
                 "-i", video_path,
+                "-ss", str(fine_offset),  # accurate fine seek via output seek
                 "-t", str(duration),
-                "-c", "copy",         # no re-encoding
+                "-c", "copy",             # no re-encoding
                 "-avoid_negative_ts", "make_zero",
                 seg_path
             ]

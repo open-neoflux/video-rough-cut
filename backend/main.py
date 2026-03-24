@@ -67,6 +67,7 @@ class Segment(BaseModel):
     is_duplicate: bool = False
     duplicate_of: Optional[int] = None
     is_keyword_marked: bool = False
+    is_silence: bool = False
     selected: bool = True
 
 
@@ -120,9 +121,9 @@ async def run_process_task(task_id: str, file_path: str):
         log.info("[%s] 转录完成，共 %d 段", task_id[:8], len(raw_segments))
         progress_cb(92.0, "转录完成，分析片段...")
 
-        # Step 3: Detect duplicates / NG takes
+        # Step 3: Detect duplicates / NG takes / silence
         def do_detect():
-            return detect_duplicates(raw_segments)
+            return detect_duplicates(raw_segments, audio_path=audio_path)
 
         segments = await loop.run_in_executor(None, do_detect)
         bad = sum(1 for s in segments if s["is_duplicate"] or s["is_keyword_marked"])

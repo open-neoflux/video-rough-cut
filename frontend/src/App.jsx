@@ -4,17 +4,12 @@ import TranscriptEditor from './components/TranscriptEditor.jsx'
 import WaveformPlayer from './components/WaveformPlayer.jsx'
 import ExportPanel from './components/ExportPanel.jsx'
 import { processVideo, pollTask } from './api.js'
+import { ThemeContext } from './ThemeContext.js'
+import { darkTheme, lightTheme } from './theme.js'
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Static (non-color) Styles ────────────────────────────────────────────────
 
-const S = {
-  app: {
-    minHeight: '100vh',
-    background: '#0f0f0f',
-    color: '#e5e7eb',
-  },
-
-  // ── Processing / loading overlay ──────────────────────────────────────────
+const S_static = {
   processingScreen: {
     display: 'flex',
     flexDirection: 'column',
@@ -25,8 +20,6 @@ const S = {
     gap: '24px',
   },
   processingCard: {
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
     borderRadius: '16px',
     padding: '48px 40px',
     width: '100%',
@@ -42,18 +35,15 @@ const S = {
   processingTitle: {
     fontSize: '20px',
     fontWeight: '700',
-    color: '#fff',
     marginBottom: '8px',
   },
   processingStep: {
     fontSize: '14px',
-    color: '#6b7280',
     marginBottom: '24px',
     minHeight: '20px',
   },
   progressBar: {
     height: '8px',
-    background: '#2a2a2a',
     borderRadius: '4px',
     overflow: 'hidden',
     marginBottom: '12px',
@@ -67,10 +57,7 @@ const S = {
   progressPct: {
     fontSize: '13px',
     fontFamily: 'monospace',
-    color: '#818cf8',
   },
-
-  // ── Editing layout ────────────────────────────────────────────────────────
   editingLayout: {
     display: 'grid',
     gridTemplateColumns: '1fr 380px',
@@ -78,15 +65,12 @@ const S = {
     height: '100vh',
     overflow: 'hidden',
   },
-  // Top bar spanning full width
   topBar: {
     gridColumn: '1 / -1',
     display: 'flex',
     alignItems: 'center',
     gap: '12px',
     padding: '12px 20px',
-    background: '#111',
-    borderBottom: '1px solid #1f1f1f',
     flexShrink: 0,
   },
   topBarLogo: {
@@ -96,12 +80,10 @@ const S = {
   topBarTitle: {
     fontSize: '16px',
     fontWeight: '700',
-    color: '#fff',
     marginRight: '8px',
   },
   topBarFile: {
     fontSize: '12px',
-    color: '#4b5563',
     fontFamily: 'monospace',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -113,24 +95,17 @@ const S = {
   },
   backBtn: {
     padding: '6px 12px',
-    background: '#2a2a2a',
-    color: '#9ca3af',
-    border: '1px solid #374151',
     borderRadius: '6px',
     fontSize: '13px',
   },
-
-  // Left panel: waveform + transcript
   leftPanel: {
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
-    borderRight: '1px solid #1f1f1f',
   },
   waveformSection: {
     padding: '16px',
     flexShrink: 0,
-    borderBottom: '1px solid #1f1f1f',
   },
   transcriptSection: {
     flex: 1,
@@ -141,14 +116,11 @@ const S = {
   sectionTitle: {
     fontSize: '12px',
     fontWeight: '600',
-    color: '#6b7280',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     padding: '12px 16px 8px',
     flexShrink: 0,
   },
-
-  // Right panel: export
   rightPanel: {
     display: 'flex',
     flexDirection: 'column',
@@ -156,8 +128,6 @@ const S = {
     padding: '16px',
     gap: '16px',
   },
-
-  // ── Error screen ─────────────────────────────────────────────────────────
   errorScreen: {
     display: 'flex',
     flexDirection: 'column',
@@ -169,8 +139,6 @@ const S = {
     textAlign: 'center',
   },
   errorCard: {
-    background: '#1a1a1a',
-    border: '1px solid rgba(239,68,68,0.3)',
     borderRadius: '16px',
     padding: '40px',
     maxWidth: '480px',
@@ -179,18 +147,15 @@ const S = {
   errorTitle: {
     fontSize: '18px',
     fontWeight: '700',
-    color: '#f87171',
     marginBottom: '12px',
   },
   errorMsg: {
     fontSize: '14px',
-    color: '#9ca3af',
     marginBottom: '24px',
     wordBreak: 'break-all',
   },
   retryBtn: {
     padding: '10px 24px',
-    background: '#6366f1',
     color: '#fff',
     border: 'none',
     borderRadius: '8px',
@@ -229,7 +194,32 @@ export default function App() {
   const [transcriptData, setTranscriptData] = useState(null) // { segments, duration, audio_path }
   const [errorMsg, setErrorMsg] = useState('')
   const [waveCurrentTime, setWaveCurrentTime] = useState(0)
+  const [seekTime, setSeekTime] = useState(null)
+  const [isDark, setIsDark] = useState(true)
   const cancelPollRef = useRef(null)
+
+  const theme = isDark ? darkTheme : lightTheme
+
+  // Update body background + scrollbar when theme changes
+  useEffect(() => {
+    document.body.style.background = theme.bg
+    document.body.style.color = theme.text
+    let el = document.getElementById('scrollbar-styles')
+    if (!el) {
+      el = document.createElement('style')
+      el.id = 'scrollbar-styles'
+      document.head.appendChild(el)
+    }
+    if (isDark) {
+      el.textContent = `::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#374151;border-radius:3px}::-webkit-scrollbar-thumb:hover{background:#4b5563}`
+    } else {
+      el.textContent = `::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}::-webkit-scrollbar-thumb:hover{background:#9ca3af}`
+    }
+  }, [theme, isDark])
+
+  const handleSegmentSeek = useCallback((start) => {
+    setSeekTime(start)
+  }, [])
 
   // ── Restore state from localStorage on mount ──────────────────────────────
   useEffect(() => {
@@ -362,7 +352,7 @@ export default function App() {
     })
   }, [])
 
-  // Auto select: keep segments that are not duplicate AND not keyword-marked
+  // Auto select: keep segments that are not duplicate, not keyword-marked, and not silence
   const handleAutoSelect = useCallback(() => {
     setTranscriptData((prev) => {
       if (!prev) return prev
@@ -370,7 +360,7 @@ export default function App() {
         ...prev,
         segments: prev.segments.map((s) => ({
           ...s,
-          selected: !s.is_duplicate && !s.is_keyword_marked,
+          selected: !s.is_duplicate && !s.is_keyword_marked && !s.is_silence,
         })),
       }
     })
@@ -426,6 +416,7 @@ export default function App() {
         is_duplicate: false,
         duplicate_of: null,
         is_keyword_marked: false,
+        is_silence: false,
         selected: true,
       }
       return { ...prev, segments: [...segs, newSeg] }
@@ -454,89 +445,206 @@ export default function App() {
   }, [])
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Theme-dependent styles (computed from current theme)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const S = {
+    app: {
+      minHeight: '100vh',
+      background: theme.bg,
+      color: theme.text,
+    },
+    processingCard: {
+      ...S_static.processingCard,
+      background: theme.surface,
+      border: `1px solid ${theme.border}`,
+    },
+    processingTitle: {
+      ...S_static.processingTitle,
+      color: theme.id === 'dark' ? '#fff' : theme.text,
+    },
+    processingStep: {
+      ...S_static.processingStep,
+      color: theme.textDim,
+    },
+    progressBar: {
+      ...S_static.progressBar,
+      background: theme.border,
+    },
+    progressPct: {
+      ...S_static.progressPct,
+      color: theme.accentLight,
+    },
+    topBar: {
+      ...S_static.topBar,
+      background: theme.surface2,
+      borderBottom: `1px solid ${theme.border2}`,
+    },
+    topBarTitle: {
+      ...S_static.topBarTitle,
+      color: theme.id === 'dark' ? '#fff' : theme.text,
+    },
+    topBarFile: {
+      ...S_static.topBarFile,
+      color: theme.textFaint,
+    },
+    backBtn: {
+      ...S_static.backBtn,
+      background: theme.border,
+      color: theme.textSub,
+      border: `1px solid ${theme.id === 'dark' ? '#374151' : theme.border2}`,
+    },
+    leftPanel: {
+      ...S_static.leftPanel,
+      borderRight: `1px solid ${theme.border2}`,
+    },
+    waveformSection: {
+      ...S_static.waveformSection,
+      borderBottom: `1px solid ${theme.border2}`,
+    },
+    sectionTitle: {
+      ...S_static.sectionTitle,
+      color: theme.textDim,
+    },
+    errorCard: {
+      ...S_static.errorCard,
+      background: theme.surface,
+      border: `1px solid ${theme.redBorder}`,
+    },
+    errorTitle: {
+      ...S_static.errorTitle,
+      color: theme.id === 'dark' ? '#f87171' : theme.red,
+    },
+    errorMsg: {
+      ...S_static.errorMsg,
+      color: theme.textSub,
+    },
+    retryBtn: {
+      ...S_static.retryBtn,
+      background: theme.accent,
+    },
+    quickHelp: {
+      background: theme.surface2,
+      border: `1px solid ${theme.border2}`,
+      borderRadius: '10px',
+      padding: '14px',
+      fontSize: '12px',
+      color: theme.textFaint,
+      lineHeight: '1.8',
+    },
+    quickHelpTitle: {
+      fontWeight: '600',
+      color: theme.textDim,
+      marginBottom: '8px',
+      textTransform: 'uppercase',
+      letterSpacing: '0.5px',
+      fontSize: '11px',
+    },
+    quickHelpDivider: {
+      marginTop: '6px',
+      borderTop: `1px solid ${theme.border2}`,
+      paddingTop: '6px',
+    },
+    themeToggleBtn: {
+      padding: '6px 10px',
+      background: theme.surface,
+      border: `1px solid ${theme.border}`,
+      borderRadius: '6px',
+      color: theme.textSub,
+      fontSize: '14px',
+    },
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
 
   // ── IDLE: file selection ──────────────────────────────────────────────────
   if (stage === 'idle') {
     return (
-      <div style={S.app}>
-        <FileSelector onProcess={handleProcess} />
-      </div>
+      <ThemeContext.Provider value={theme}>
+        <div style={S.app}>
+          <FileSelector onProcess={handleProcess} />
+        </div>
+      </ThemeContext.Provider>
     )
   }
 
   // ── PROCESSING ────────────────────────────────────────────────────────────
   if (stage === 'processing') {
     return (
-      <div style={S.app}>
-        <div style={S.processingScreen}>
-          <div style={S.processingCard}>
-            <span
+      <ThemeContext.Provider value={theme}>
+        <div style={S.app}>
+          <div style={S_static.processingScreen}>
+            <div style={S.processingCard}>
+              <span
+                style={{
+                  ...S_static.processingIcon,
+                  display: 'inline-block',
+                  animation: 'spin 1.5s linear infinite',
+                }}
+              >
+                ⚙️
+              </span>
+              <div style={S.processingTitle}>正在分析视频...</div>
+              <div style={S.processingStep}>{step || '初始化...'}</div>
+              <div style={S.progressBar}>
+                <div
+                  style={{
+                    ...S_static.progressFill,
+                    width: `${Math.max(2, progress)}%`,
+                  }}
+                />
+              </div>
+              <div style={S.progressPct}>{Math.round(progress)}%</div>
+            </div>
+            <div
               style={{
-                ...S.processingIcon,
-                display: 'inline-block',
-                animation: 'spin 1.5s linear infinite',
+                fontSize: '12px',
+                color: theme.id === 'dark' ? '#374151' : theme.textDim,
+                maxWidth: '400px',
+                textAlign: 'center',
+                fontFamily: 'monospace',
               }}
             >
-              ⚙️
-            </span>
-            <div style={S.processingTitle}>正在分析视频...</div>
-            <div style={S.processingStep}>{step || '初始化...'}</div>
-            <div style={S.progressBar}>
-              <div
-                style={{
-                  ...S.progressFill,
-                  width: `${Math.max(2, progress)}%`,
-                }}
-              />
+              {filePath}
             </div>
-            <div style={S.progressPct}>{Math.round(progress)}%</div>
+            <button
+              style={{
+                padding: '8px 16px',
+                background: 'transparent',
+                color: theme.textDim,
+                border: `1px solid ${theme.id === 'dark' ? '#374151' : theme.border2}`,
+                borderRadius: '6px',
+                fontSize: '13px',
+              }}
+              onClick={handleBack}
+            >
+              取消
+            </button>
           </div>
-          <div
-            style={{
-              fontSize: '12px',
-              color: '#374151',
-              maxWidth: '400px',
-              textAlign: 'center',
-              fontFamily: 'monospace',
-            }}
-          >
-            {filePath}
-          </div>
-          <button
-            style={{
-              padding: '8px 16px',
-              background: 'transparent',
-              color: '#6b7280',
-              border: '1px solid #374151',
-              borderRadius: '6px',
-              fontSize: '13px',
-            }}
-            onClick={handleBack}
-          >
-            取消
-          </button>
         </div>
-      </div>
+      </ThemeContext.Provider>
     )
   }
 
   // ── ERROR ─────────────────────────────────────────────────────────────────
   if (stage === 'error') {
     return (
-      <div style={S.app}>
-        <div style={S.errorScreen}>
-          <div style={S.errorCard}>
-            <div style={{ fontSize: '40px', marginBottom: '16px' }}>❌</div>
-            <div style={S.errorTitle}>处理失败</div>
-            <div style={S.errorMsg}>{errorMsg}</div>
-            <button style={S.retryBtn} onClick={handleBack}>
-              重新选择文件
-            </button>
+      <ThemeContext.Provider value={theme}>
+        <div style={S.app}>
+          <div style={S_static.errorScreen}>
+            <div style={S.errorCard}>
+              <div style={{ fontSize: '40px', marginBottom: '16px' }}>❌</div>
+              <div style={S.errorTitle}>处理失败</div>
+              <div style={S.errorMsg}>{errorMsg}</div>
+              <button style={S.retryBtn} onClick={handleBack}>
+                重新选择文件
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      </ThemeContext.Provider>
     )
   }
 
@@ -545,100 +653,92 @@ export default function App() {
     const { segments, audio_path: audioPath } = transcriptData
 
     return (
-      <div style={{ ...S.app, overflow: 'hidden' }}>
-        <div style={S.editingLayout}>
-          {/* Top bar */}
-          <div style={S.topBar}>
-            <span style={S.topBarLogo}>✂️</span>
-            <span style={S.topBarTitle}>视频粗剪助手</span>
-            <span style={S.topBarFile}>{filePath}</span>
-            <div style={S.topBarSpacer} />
-            <button style={S.backBtn} onClick={handleBack} title="返回文件选择">
-              ← 重新选择
-            </button>
-          </div>
-
-          {/* Left panel */}
-          <div style={S.leftPanel}>
-            {/* Waveform player */}
-            <div style={S.waveformSection}>
-              <WaveformPlayer
-                audioPath={audioPath}
-                segments={segments}
-                onTimeUpdate={setWaveCurrentTime}
-              />
-            </div>
-
-            {/* Transcript editor */}
-            <div style={S.transcriptSection}>
-              <div style={S.sectionTitle}>📝 转录片段</div>
-              <TranscriptEditor
-                segments={segments}
-                onSegmentToggle={handleSegmentToggle}
-                onSelectAll={handleSelectAll}
-                onSelectNone={handleSelectNone}
-                onAutoSelect={handleAutoSelect}
-                onSegmentEdit={handleSegmentEdit}
-                onSegmentSplit={handleSegmentSplit}
-                onSegmentMerge={handleSegmentMerge}
-                onSegmentAdd={handleSegmentAdd}
-              />
-            </div>
-          </div>
-
-          {/* Right panel */}
-          <div style={S.rightPanel}>
-            <ExportPanel
-              filePath={filePath}
-              segments={segments}
-              onExportDone={handleExportDone}
-            />
-
-            {/* Quick help */}
-            <div
-              style={{
-                background: '#111',
-                border: '1px solid #1f1f1f',
-                borderRadius: '10px',
-                padding: '14px',
-                fontSize: '12px',
-                color: '#4b5563',
-                lineHeight: '1.8',
-              }}
-            >
-              <div
-                style={{
-                  fontWeight: '600',
-                  color: '#6b7280',
-                  marginBottom: '8px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                  fontSize: '11px',
-                }}
+      <ThemeContext.Provider value={theme}>
+        <div style={{ ...S.app, overflow: 'hidden' }}>
+          <div style={S_static.editingLayout}>
+            {/* Top bar */}
+            <div style={S.topBar}>
+              <span style={S_static.topBarLogo}>✂️</span>
+              <span style={S.topBarTitle}>视频粗剪助手</span>
+              <span style={S.topBarFile}>{filePath}</span>
+              <div style={S_static.topBarSpacer} />
+              <button style={S.backBtn} onClick={handleBack} title="返回文件选择">
+                ← 重新选择
+              </button>
+              <button
+                onClick={() => setIsDark(d => !d)}
+                style={S.themeToggleBtn}
+                title={isDark ? '切换到浅色模式' : '切换到深色模式'}
               >
-                操作说明
+                {isDark ? '☀️' : '🌙'}
+              </button>
+            </div>
+
+            {/* Left panel */}
+            <div style={S.leftPanel}>
+              {/* Waveform player */}
+              <div style={S.waveformSection}>
+                <WaveformPlayer
+                  audioPath={audioPath}
+                  segments={segments}
+                  seekTime={seekTime}
+                  onTimeUpdate={setWaveCurrentTime}
+                />
               </div>
-              <div>✅ 绿色边框 = 保留</div>
-              <div>❌ 红色边框 = 删除</div>
-              <div>🔁 重复 = 相似内容</div>
-              <div>⚠️ 标记 = 含 NG 关键词</div>
-              <div style={{ marginTop: '6px' }}>点击片段卡片切换保留/删除</div>
-              <div>或使用顶部按钮批量操作</div>
-              <div style={{ marginTop: '6px', borderTop: '1px solid #1f1f1f', paddingTop: '6px' }}>
-                ✂️ 拆分 / 合并下一段 / 编辑时间
+
+              {/* Transcript editor */}
+              <div style={{ ...S_static.transcriptSection, padding: '0 16px 16px' }}>
+                <TranscriptEditor
+                  segments={segments}
+                  currentTime={waveCurrentTime}
+                  onSegmentSeek={handleSegmentSeek}
+                  onSegmentToggle={handleSegmentToggle}
+                  onAutoSelect={handleAutoSelect}
+                  onSegmentEdit={handleSegmentEdit}
+                  onSegmentSplit={handleSegmentSplit}
+                  onSegmentMerge={handleSegmentMerge}
+                  onSegmentAdd={handleSegmentAdd}
+                />
               </div>
-              <div>悬停片段卡片显示编辑控件</div>
+            </div>
+
+            {/* Right panel */}
+            <div style={S_static.rightPanel}>
+              <ExportPanel
+                filePath={filePath}
+                segments={segments}
+                onExportDone={handleExportDone}
+              />
+
+              {/* Quick help */}
+              <div style={S.quickHelp}>
+                <div style={S.quickHelpTitle}>
+                  操作说明
+                </div>
+                <div>✅ 绿色边框 = 保留</div>
+                <div>❌ 红色边框 = 删除</div>
+                <div>🔁 重复 = 相似内容</div>
+                <div>⚠️ 标记 = 含 NG 关键词</div>
+                <div style={{ marginTop: '6px' }}>点击片段卡片切换保留/删除</div>
+                <div>或使用顶部按钮批量操作</div>
+                <div style={S.quickHelpDivider}>
+                  ✂️ 拆分 / 合并下一段 / 编辑时间
+                </div>
+                <div>悬停片段卡片显示编辑控件</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </ThemeContext.Provider>
     )
   }
 
   // Fallback
   return (
-    <div style={S.app}>
-      <FileSelector onProcess={handleProcess} />
-    </div>
+    <ThemeContext.Provider value={theme}>
+      <div style={S.app}>
+        <FileSelector onProcess={handleProcess} />
+      </div>
+    </ThemeContext.Provider>
   )
 }

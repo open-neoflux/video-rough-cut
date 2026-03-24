@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { exportVideo, pollTask } from '../api.js'
+import { useTheme } from '../ThemeContext.js'
 
 /**
- * Format seconds to M分S秒 string
+ * Format seconds to JSX with number + small unit labels
  */
 function formatDuration(seconds) {
-  if (!seconds || isNaN(seconds)) return '0秒'
+  const unitStyle = { fontSize: '11px', fontWeight: '500', marginLeft: '1px', opacity: 0.7 }
+  if (!seconds || isNaN(seconds)) return <><span>0</span><span style={unitStyle}>秒</span></>
   const m = Math.floor(seconds / 60)
   const s = Math.round(seconds % 60)
-  if (m === 0) return `${s}秒`
-  return `${m}分${s}秒`
+  if (m === 0) return <><span>{s}</span><span style={unitStyle}>秒</span></>
+  return <><span>{m}</span><span style={unitStyle}>分</span><span style={{ marginLeft: '3px' }}>{s}</span><span style={unitStyle}>秒</span></>
 }
 
 /**
@@ -25,10 +27,9 @@ function buildDefaultOutputPath(filePath) {
   return filePath + '_粗剪.mp4'
 }
 
-const styles = {
+// Static (non-color) styles
+const staticStyles = {
   container: {
-    background: '#1a1a1a',
-    border: '1px solid #2a2a2a',
     borderRadius: '12px',
     padding: '20px',
     display: 'flex',
@@ -38,7 +39,6 @@ const styles = {
   title: {
     fontSize: '13px',
     fontWeight: '600',
-    color: '#9ca3af',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
     marginBottom: '4px',
@@ -49,11 +49,9 @@ const styles = {
     gap: '10px',
   },
   statCard: {
-    background: '#111',
     borderRadius: '8px',
     padding: '12px',
     textAlign: 'center',
-    border: '1px solid #2a2a2a',
   },
   statValue: {
     fontSize: '22px',
@@ -62,26 +60,20 @@ const styles = {
   },
   statLabel: {
     fontSize: '12px',
-    color: '#6b7280',
   },
   divider: {
     height: '1px',
-    background: '#2a2a2a',
   },
   outputLabel: {
     fontSize: '13px',
-    color: '#9ca3af',
     marginBottom: '8px',
     display: 'block',
     fontWeight: '500',
   },
   outputInput: {
     width: '100%',
-    background: '#111',
-    border: '1px solid #374151',
     borderRadius: '8px',
     padding: '10px 12px',
-    color: '#e5e7eb',
     fontSize: '13px',
     outline: 'none',
     fontFamily: 'monospace',
@@ -89,7 +81,6 @@ const styles = {
   exportBtn: {
     width: '100%',
     padding: '14px',
-    background: '#6366f1',
     color: '#fff',
     border: 'none',
     borderRadius: '8px',
@@ -100,11 +91,6 @@ const styles = {
     justifyContent: 'center',
     gap: '8px',
     transition: 'background 0.15s',
-  },
-  exportBtnDisabled: {
-    background: '#374151',
-    cursor: 'not-allowed',
-    color: '#6b7280',
   },
   progressWrapper: {
     display: 'flex',
@@ -118,17 +104,14 @@ const styles = {
   },
   progressStep: {
     fontSize: '13px',
-    color: '#9ca3af',
   },
   progressPct: {
     fontSize: '13px',
     fontWeight: '600',
-    color: '#818cf8',
     fontFamily: 'monospace',
   },
   progressBar: {
     height: '6px',
-    background: '#2a2a2a',
     borderRadius: '3px',
     overflow: 'hidden',
   },
@@ -139,8 +122,6 @@ const styles = {
     transition: 'width 0.3s ease',
   },
   successBox: {
-    background: 'rgba(34, 197, 94, 0.08)',
-    border: '1px solid rgba(34, 197, 94, 0.25)',
     borderRadius: '8px',
     padding: '14px',
     display: 'flex',
@@ -150,30 +131,22 @@ const styles = {
   successTitle: {
     fontSize: '15px',
     fontWeight: '600',
-    color: '#4ade80',
     display: 'flex',
     alignItems: 'center',
     gap: '8px',
   },
   successPath: {
     fontSize: '12px',
-    color: '#6b7280',
     fontFamily: 'monospace',
     wordBreak: 'break-all',
   },
   errorBox: {
-    background: 'rgba(239, 68, 68, 0.08)',
-    border: '1px solid rgba(239, 68, 68, 0.25)',
     borderRadius: '8px',
     padding: '14px',
-    color: '#f87171',
     fontSize: '13px',
   },
   reExportBtn: {
     padding: '8px 14px',
-    background: '#2a2a2a',
-    color: '#d1d5db',
-    border: '1px solid #374151',
     borderRadius: '6px',
     fontSize: '13px',
     marginTop: '8px',
@@ -181,6 +154,7 @@ const styles = {
 }
 
 export default function ExportPanel({ filePath, segments, onExportDone }) {
+  const t = useTheme()
   const [outputPath, setOutputPath] = useState('')
   const [exporting, setExporting] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -267,42 +241,128 @@ export default function ExportPanel({ filePath, segments, onExportDone }) {
     setOutputPath(buildDefaultOutputPath(filePath))
   }
 
+  // Theme-derived styles
+  const containerStyle = {
+    ...staticStyles.container,
+    background: t.surface,
+    border: `1px solid ${t.border}`,
+  }
+
+  const titleStyle = {
+    ...staticStyles.title,
+    color: t.textSub,
+  }
+
+  const statCardStyle = {
+    ...staticStyles.statCard,
+    background: t.surface2,
+    border: `1px solid ${t.border}`,
+  }
+
+  const statLabelStyle = {
+    ...staticStyles.statLabel,
+    color: t.textSub,
+  }
+
+  const dividerStyle = {
+    ...staticStyles.divider,
+    background: t.border,
+  }
+
+  const outputLabelStyle = {
+    ...staticStyles.outputLabel,
+    color: t.textSub,
+  }
+
+  const outputInputStyle = {
+    ...staticStyles.outputInput,
+    background: t.surface2,
+    border: `1px solid ${exporting ? t.border : (t.id === 'dark' ? '#374151' : t.border2)}`,
+    color: t.text,
+  }
+
+  const exportBtnStyle = canExport
+    ? { ...staticStyles.exportBtn, background: t.accent }
+    : { ...staticStyles.exportBtn, background: t.id === 'dark' ? '#374151' : t.border2, cursor: 'not-allowed', color: t.textDim }
+
+  const progressStepStyle = {
+    ...staticStyles.progressStep,
+    color: t.textSub,
+  }
+
+  const progressPctStyle = {
+    ...staticStyles.progressPct,
+    color: t.accentLight,
+  }
+
+  const progressBarStyle = {
+    ...staticStyles.progressBar,
+    background: t.border,
+  }
+
+  const successBoxStyle = {
+    ...staticStyles.successBox,
+    background: t.greenSoft,
+    border: `1px solid ${t.greenBorder}`,
+  }
+
+  const successTitleStyle = {
+    ...staticStyles.successTitle,
+    color: t.id === 'dark' ? '#4ade80' : t.green,
+  }
+
+  const successPathStyle = {
+    ...staticStyles.successPath,
+    color: t.textDim,
+  }
+
+  const errorBoxStyle = {
+    ...staticStyles.errorBox,
+    background: t.redSoft,
+    border: `1px solid ${t.redBorder}`,
+    color: t.id === 'dark' ? '#f87171' : t.red,
+  }
+
+  const reExportBtnStyle = {
+    ...staticStyles.reExportBtn,
+    background: t.border,
+    color: t.text,
+    border: `1px solid ${t.id === 'dark' ? '#374151' : t.border2}`,
+  }
+
   return (
-    <div style={styles.container}>
-      <div style={styles.title}>📤 导出粗剪</div>
+    <div style={containerStyle}>
+      <div style={titleStyle}>📤 导出粗剪</div>
 
       {/* Stats */}
-      <div style={styles.statsGrid}>
-        <div style={styles.statCard}>
-          <div style={{ ...styles.statValue, color: '#4ade80' }}>{stats.kept}</div>
-          <div style={styles.statLabel}>保留片段</div>
+      <div style={staticStyles.statsGrid}>
+        <div style={statCardStyle}>
+          <div style={{ ...staticStyles.statValue, color: t.id === 'dark' ? '#4ade80' : t.green }}>{stats.kept}</div>
+          <div style={statLabelStyle}>保留片段</div>
         </div>
-        <div style={styles.statCard}>
-          <div style={{ ...styles.statValue, color: '#f87171' }}>{stats.deleted}</div>
-          <div style={styles.statLabel}>删除片段</div>
+        <div style={statCardStyle}>
+          <div style={{ ...staticStyles.statValue, color: t.id === 'dark' ? '#f87171' : t.red }}>{stats.deleted}</div>
+          <div style={statLabelStyle}>删除片段</div>
         </div>
-        <div style={styles.statCard}>
-          <div style={{ ...styles.statValue, color: '#818cf8' }}>
+        <div style={statCardStyle}>
+          <div style={{ ...staticStyles.statValue, color: t.accentLight }}>
             {formatDuration(stats.keptDuration)}
           </div>
-          <div style={styles.statLabel}>预计时长</div>
+          <div style={statLabelStyle}>预计时长</div>
         </div>
       </div>
 
-      <div style={styles.divider} />
+      <div style={dividerStyle} />
 
       {/* Output path */}
       <div>
-        <label style={styles.outputLabel} htmlFor="output-path">
+        <label style={outputLabelStyle} htmlFor="output-path">
           输出文件路径
         </label>
         <input
           id="output-path"
           type="text"
-          style={{
-            ...styles.outputInput,
-            borderColor: exporting ? '#374151' : undefined,
-          }}
+          style={outputInputStyle}
           value={outputPath}
           onChange={(e) => setOutputPath(e.target.value)}
           disabled={exporting}
@@ -314,10 +374,7 @@ export default function ExportPanel({ filePath, segments, onExportDone }) {
       {/* Export button */}
       {exportStatus !== 'done' && (
         <button
-          style={{
-            ...styles.exportBtn,
-            ...(canExport ? {} : styles.exportBtnDisabled),
-          }}
+          style={exportBtnStyle}
           onClick={handleExport}
           disabled={!canExport}
         >
@@ -337,15 +394,15 @@ export default function ExportPanel({ filePath, segments, onExportDone }) {
 
       {/* Progress */}
       {exporting && (
-        <div style={styles.progressWrapper}>
-          <div style={styles.progressHeader}>
-            <span style={styles.progressStep}>{step}</span>
-            <span style={styles.progressPct}>{Math.round(progress)}%</span>
+        <div style={staticStyles.progressWrapper}>
+          <div style={staticStyles.progressHeader}>
+            <span style={progressStepStyle}>{step}</span>
+            <span style={progressPctStyle}>{Math.round(progress)}%</span>
           </div>
-          <div style={styles.progressBar}>
+          <div style={progressBarStyle}>
             <div
               style={{
-                ...styles.progressFill,
+                ...staticStyles.progressFill,
                 width: `${progress}%`,
               }}
             />
@@ -355,13 +412,13 @@ export default function ExportPanel({ filePath, segments, onExportDone }) {
 
       {/* Success */}
       {exportStatus === 'done' && (
-        <div style={styles.successBox}>
-          <div style={styles.successTitle}>
+        <div style={successBoxStyle}>
+          <div style={successTitleStyle}>
             <span>✅</span>
             <span>导出成功！</span>
           </div>
-          <div style={styles.successPath}>{finalOutputPath}</div>
-          <button style={styles.reExportBtn} onClick={handleReset}>
+          <div style={successPathStyle}>{finalOutputPath}</div>
+          <button style={reExportBtnStyle} onClick={handleReset}>
             重新导出
           </button>
         </div>
@@ -369,10 +426,10 @@ export default function ExportPanel({ filePath, segments, onExportDone }) {
 
       {/* Error */}
       {exportStatus === 'error' && (
-        <div style={styles.errorBox}>
+        <div style={errorBoxStyle}>
           <div style={{ fontWeight: '600', marginBottom: '6px' }}>❌ 导出失败</div>
           <div>{exportError}</div>
-          <button style={styles.reExportBtn} onClick={handleReset}>
+          <button style={reExportBtnStyle} onClick={handleReset}>
             重试
           </button>
         </div>

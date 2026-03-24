@@ -13,7 +13,7 @@ echo "✅ ffmpeg OK"
 # Start backend in background
 echo "🚀 启动后端服务..."
 cd "$PROJECT_DIR/backend"
-python3 main.py &
+/Users/songqh/miniconda3/bin/python3 main.py &
 BACKEND_PID=$!
 echo "   后端 PID: $BACKEND_PID"
 
