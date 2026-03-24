@@ -75,7 +75,7 @@ npm run dev
    - **Green border** = selected (will be kept)
    - **Red border** = deselected (will be deleted)
    - **🔁 重复** badge = similar/duplicate content auto-detected
-   - **⚠️ 标记** badge = contains NG keywords
+   - **⚠️ 标记** badge = contains NG（不好的镜头）keywords
 5. Toggle individual segments or use the toolbar buttons (全选/全不选/智能选择)
 6. Set the output path in the Export panel (defaults to `original_粗剪.mp4`)
 7. Click **导出粗剪** — ffmpeg assembles the final video

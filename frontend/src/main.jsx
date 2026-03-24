@@ -2,7 +2,6 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 
-// Global styles injected via JS to avoid needing a CSS file
 const style = document.createElement('style')
 style.textContent = `
   *, *::before, *::after {
@@ -11,38 +10,47 @@ style.textContent = `
     padding: 0;
   }
 
+  html { -webkit-text-size-adjust: 100%; }
+
   body {
-    background-color: #0f0f0f;
-    color: #e5e7eb;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-      'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    background-color: #f2f2f7;
+    color: #000;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+      'Helvetica Neue', Arial, sans-serif;
     font-size: 14px;
     line-height: 1.5;
     min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: #1a1a1a;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: #3f3f3f;
-    border-radius: 3px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: #5f5f5f;
-  }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(120,120,128,0.28); border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(120,120,128,0.45); }
 
   button {
     cursor: pointer;
     font-family: inherit;
+    -webkit-font-smoothing: antialiased;
+    outline: none;
+  }
+  button:focus-visible {
+    outline: 2px solid #0A84FF;
+    outline-offset: 2px;
   }
 
-  input {
+  input, textarea {
     font-family: inherit;
+    -webkit-font-smoothing: antialiased;
+    outline: none;
+  }
+  input:focus-visible {
+    outline: none;
+  }
+
+  ::selection {
+    background: rgba(10,132,255,0.3);
   }
 `
 document.head.appendChild(style)

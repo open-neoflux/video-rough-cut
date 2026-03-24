@@ -1,65 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
 import { useTheme } from '../ThemeContext.js'
+import { WaveformIcon, PlayIcon, PauseIcon } from './Icons.jsx'
 
 function formatTime(sec) {
   if (typeof sec !== 'number' || isNaN(sec)) return '0:00'
   const m = Math.floor(sec / 60)
   const s = Math.floor(sec % 60)
   return `${m}:${String(s).padStart(2, '0')}`
-}
-
-// Static (non-color) styles
-const staticStyles = {
-  container: {
-    borderRadius: '12px',
-    padding: '16px',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '12px',
-  },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  title: {
-    fontSize: '13px',
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: '0.5px',
-  },
-  waveformWrapper: {
-    position: 'relative',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    minHeight: '80px',
-  },
-  waveformContainer: { width: '100%' },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    pointerEvents: 'none',
-  },
-  controls: { display: 'flex', alignItems: 'center', gap: '12px' },
-  playBtn: {
-    width: '40px',
-    height: '40px',
-    borderRadius: '50%',
-    color: '#fff',
-    border: 'none',
-    fontSize: '16px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  timeDisplay: { fontFamily: 'monospace', fontSize: '14px' },
-  legend: { display: 'flex', gap: '16px', flexWrap: 'wrap' },
-  legendItem: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' },
-  legendDot: { width: '12px', height: '12px', borderRadius: '3px', flexShrink: 0 },
-  loadingMsg: { fontSize: '13px', padding: '24px', textAlign: 'center' },
-  errorMsg: { fontSize: '13px', padding: '16px', textAlign: 'center' },
 }
 
 export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUpdate }) {
@@ -75,7 +22,6 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
 
   const audioUrl = audioPath ? `/api/audio?path=${encodeURIComponent(audioPath)}` : null
 
-  // 绘制删除段红色遮罩
   const drawOverlays = useCallback(() => {
     if (!overlayRef.current || !duration || !segments) return
     const container = waveformRef.current
@@ -91,14 +37,13 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
       if (seg.selected) return
       const x = (seg.start / duration) * width
       const w = Math.max(2, ((seg.end - seg.start) / duration) * width)
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.25)'
+      ctx.fillStyle = t.id === 'dark' ? 'rgba(255,69,58,0.18)' : 'rgba(255,59,48,0.12)'
       ctx.fillRect(x, 0, w, height)
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.6)'
+      ctx.fillStyle = t.id === 'dark' ? 'rgba(255,69,58,0.55)' : 'rgba(255,59,48,0.5)'
       ctx.fillRect(x, 0, w, 2)
     })
-  }, [segments, duration])
+  }, [segments, duration, t])
 
-  // 初始化 WaveSurfer
   useEffect(() => {
     if (!audioUrl || !waveformRef.current) return
     let ws = null
@@ -108,45 +53,40 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
       try {
         const { default: WaveSurfer } = await import('wavesurfer.js')
         if (destroyed) return
-
-        const waveColor = t.id === 'dark' ? '#374151' : '#d1d5db'
-        const progressColor = t.accent
-
+        const waveColor = t.id === 'dark' ? 'rgba(84,84,88,0.8)' : 'rgba(199,199,204,0.9)'
         ws = WaveSurfer.create({
           container: waveformRef.current,
           waveColor,
-          progressColor,
-          cursorColor: t.accentLight,
+          progressColor: t.accent,
+          cursorColor: t.accent,
           cursorWidth: 2,
-          height: 80,
+          height: 72,
           normalize: true,
           interact: true,
           fillParent: true,
+          barWidth: 2,
+          barGap: 1,
+          barRadius: 2,
         })
-
         ws.on('ready', () => {
           if (destroyed) return
           setDuration(ws.getDuration())
           setLoading(false)
           setError('')
         })
-
         ws.on('timeupdate', (time) => {
           if (destroyed) return
           setCurrentTime(time)
           if (onTimeUpdate) onTimeUpdate(time)
         })
-
         ws.on('play', () => !destroyed && setIsPlaying(true))
         ws.on('pause', () => !destroyed && setIsPlaying(false))
         ws.on('finish', () => !destroyed && setIsPlaying(false))
-        ws.on('error', (err) => {
+        ws.on('error', () => {
           if (destroyed) return
-          console.error('WaveSurfer error:', err)
           setError('音频加载失败')
           setLoading(false)
         })
-
         await ws.load(audioUrl)
         wavesurferRef.current = ws
       } catch (err) {
@@ -160,7 +100,6 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
     setLoading(true)
     setError('')
     init()
-
     return () => {
       destroyed = true
       if (ws) { try { ws.destroy() } catch (e) {} }
@@ -168,25 +107,20 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
     }
   }, [audioUrl]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Update waveform colors when theme changes (if wavesurfer is ready)
   useEffect(() => {
     if (!wavesurferRef.current) return
     try {
-      const waveColor = t.id === 'dark' ? '#374151' : '#d1d5db'
+      const waveColor = t.id === 'dark' ? 'rgba(84,84,88,0.8)' : 'rgba(199,199,204,0.9)'
       wavesurferRef.current.setOptions({ waveColor, progressColor: t.accent })
-    } catch (e) {
-      // ignore if not supported
-    }
+    } catch (e) {}
   }, [t])
 
-  // 外部传入 seekTime 时跳转
   useEffect(() => {
     if (seekTime == null || !wavesurferRef.current || !duration) return
     const pos = Math.max(0, Math.min(seekTime / duration, 1))
     wavesurferRef.current.seekTo(pos)
   }, [seekTime, duration])
 
-  // 播放时跳过标红（已删除）的片段
   useEffect(() => {
     if (!isPlaying || !wavesurferRef.current || !segments || !duration) return
     const deleted = segments.filter(s => !s.selected)
@@ -206,98 +140,135 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
 
   const togglePlayPause = () => { if (wavesurferRef.current) wavesurferRef.current.playPause() }
 
-  const containerStyle = {
-    ...staticStyles.container,
-    background: t.surface,
-    border: `1px solid ${t.border}`,
-  }
-
-  const titleStyle = {
-    ...staticStyles.title,
-    color: t.textSub,
-  }
-
-  const waveformWrapperStyle = {
-    ...staticStyles.waveformWrapper,
-    background: t.surface2,
-  }
-
-  const playBtnStyle = {
-    ...staticStyles.playBtn,
-    background: loading ? (t.id === 'dark' ? '#374151' : t.border2) : t.accent,
-  }
-
-  const timeDisplayStyle = {
-    ...staticStyles.timeDisplay,
-    color: t.textSub,
-  }
-
-  const timeAccentStyle = {
-    color: t.text,
-    fontWeight: '600',
-  }
-
-  const legendItemStyle = {
-    ...staticStyles.legendItem,
-    color: t.textDim,
-  }
-
-  const loadingMsgStyle = {
-    ...staticStyles.loadingMsg,
-    color: t.textDim,
-  }
-
-  const errorMsgStyle = {
-    ...staticStyles.errorMsg,
-    color: t.id === 'dark' ? '#f87171' : t.red,
-  }
+  const progress = duration > 0 ? currentTime / duration : 0
 
   if (!audioPath) {
-    return <div style={containerStyle}><div style={loadingMsgStyle}>音频路径未设置</div></div>
+    return (
+      <div style={{
+        borderRadius: '14px', padding: '20px', background: t.surface,
+        border: `1px solid ${t.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: t.textDim, fontSize: '13px', minHeight: '100px',
+      }}>
+        音频路径未设置
+      </div>
+    )
   }
 
   return (
-    <div style={containerStyle}>
-      <div style={staticStyles.header}>
-        <div style={titleStyle}>🎵 音频波形</div>
-        <div style={staticStyles.legend}>
-          <div style={legendItemStyle}>
-            <div style={{ ...staticStyles.legendDot, background: t.accent }} /><span>保留</span>
-          </div>
-          <div style={legendItemStyle}>
-            <div style={{ ...staticStyles.legendDot, background: 'rgba(239,68,68,0.4)' }} /><span>删除（自动跳过）</span>
-          </div>
+    <div style={{
+      borderRadius: '14px', padding: '16px', background: t.surface,
+      border: `1px solid ${t.border}`,
+      boxShadow: t.id === 'dark' ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
+      display: 'flex', flexDirection: 'column', gap: '12px',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '6px',
+          fontSize: '14px', fontWeight: '700', letterSpacing: '-0.1px',
+          color: t.text,
+        }}>
+          <WaveformIcon size={15} color={t.text}/>
+          音频波形
+        </div>
+        {/* Legend */}
+        <div style={{ display: 'flex', gap: '12px' }}>
+          {[
+            { color: t.accent, label: '保留' },
+            { color: t.red, label: '删除（自动跳过）' },
+          ].map(({ color, label }) => (
+            <div key={label} style={{
+              display: 'flex', alignItems: 'center', gap: '5px',
+              fontSize: '11px', color: t.textDim,
+            }}>
+              <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: color, opacity: 0.7 }}/>
+              {label}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div style={waveformWrapperStyle}>
-        <div ref={waveformRef} style={staticStyles.waveformContainer} />
-        <canvas ref={overlayRef} style={{ ...staticStyles.overlay, left: 0, right: 0, width: '100%', height: '100%' }} />
+      {/* Waveform */}
+      <div style={{
+        position: 'relative', borderRadius: '10px', overflow: 'hidden',
+        background: t.id === 'dark' ? t.surface2 : '#f9f9fb',
+        minHeight: '72px',
+      }}>
+        <div ref={waveformRef} style={{ width: '100%' }} />
+        <canvas ref={overlayRef} style={{
+          position: 'absolute', top: 0, left: 0,
+          width: '100%', height: '100%', pointerEvents: 'none',
+        }} />
         {loading && !error && (
-          <div style={{ ...loadingMsgStyle, position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            fontSize: '12px', color: t.textDim,
+          }}>
             正在加载波形...
           </div>
         )}
         {error && (
-          <div style={{ ...errorMsgStyle, position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            fontSize: '12px', color: t.red,
+          }}>
             {error}
           </div>
         )}
       </div>
 
-      <div style={staticStyles.controls}>
+      {/* Controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Play button */}
         <button
-          style={playBtnStyle}
           onClick={togglePlayPause}
           disabled={loading || !!error}
           title={isPlaying ? '暂停' : '播放'}
+          style={{
+            width: '40px', height: '40px', borderRadius: '50%', flexShrink: 0,
+            background: (loading || !!error) ? t.surface2 : t.accent,
+            border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            transition: 'all 0.18s',
+            boxShadow: (!loading && !error) ? `0 4px 12px ${t.accentSoft}` : 'none',
+          }}
         >
-          {isPlaying ? '⏸' : '▶'}
+          {isPlaying
+            ? <PauseIcon size={16} color={loading || error ? t.textDim : '#fff'}/>
+            : <PlayIcon size={16} color={loading || error ? t.textDim : '#fff'}/>
+          }
         </button>
-        <div style={timeDisplayStyle}>
-          <span style={timeAccentStyle}>{formatTime(currentTime)}</span>
-          {' / '}
-          <span>{formatTime(duration)}</span>
+
+        {/* Time + progress */}
+        <div style={{ flex: 1 }}>
+          <div style={{
+            display: 'flex', justifyContent: 'space-between',
+            marginBottom: '5px',
+          }}>
+            <span style={{ fontFamily: 'monospace', fontSize: '12px', fontWeight: '600', color: t.text }}>
+              {formatTime(currentTime)}
+            </span>
+            <span style={{ fontFamily: 'monospace', fontSize: '12px', color: t.textDim }}>
+              {formatTime(duration)}
+            </span>
+          </div>
+          {/* Progress bar */}
+          <div style={{
+            height: '3px', borderRadius: '2px',
+            background: t.border,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%', borderRadius: '2px',
+              background: t.accent,
+              width: `${progress * 100}%`,
+              transition: 'width 0.1s linear',
+            }}/>
+          </div>
         </div>
       </div>
     </div>
