@@ -1,12 +1,13 @@
 import asyncio
 import os
+import time
 import uuid
 import mimetypes
 import subprocess
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional, List
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -26,6 +27,36 @@ log = get_logger("main")
 # In-memory task store: task_id -> task dict
 tasks: Dict[str, Dict[str, Any]] = {}
 
+# Tasks (and their audio temp files) are cleaned up after this many seconds.
+TASK_TTL_SECONDS = 3 * 3600  # 3 hours
+
+
+def _delete_task_audio(task: Dict[str, Any]) -> None:
+    """Delete the extracted WAV temp file for a task, if present."""
+    audio_path = (task.get("result") or {}).get("audio_path")
+    if audio_path and os.path.exists(audio_path):
+        try:
+            os.remove(audio_path)
+            log.info("已删除临时音频: %s", audio_path)
+        except OSError as e:
+            log.warning("删除临时音频失败: %s", e)
+
+
+async def _cleanup_loop() -> None:
+    """Background loop: evict tasks and their audio files after TASK_TTL_SECONDS."""
+    while True:
+        await asyncio.sleep(1800)  # check every 30 minutes
+        now = time.monotonic()
+        expired = [
+            tid for tid, t in list(tasks.items())
+            if now - t.get("created_at", now) > TASK_TTL_SECONDS
+        ]
+        for tid in expired:
+            _delete_task_audio(tasks[tid])
+            del tasks[tid]
+        if expired:
+            log.info("已清理 %d 个过期任务", len(expired))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,8 +67,16 @@ async def lifespan(app: FastAPI):
         version_line = result.stdout.decode("utf-8", errors="replace").split("\n")[0]
         log.info("ffmpeg 就绪: %s", version_line)
     log.info("视频粗剪助手后端启动")
-    yield
-    log.info("视频粗剪助手后端关闭")
+
+    cleanup_task = asyncio.create_task(_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        # Best-effort: delete all remaining audio temp files on shutdown
+        for task in list(tasks.values()):
+            _delete_task_audio(task)
+        log.info("视频粗剪助手后端关闭")
 
 
 app = FastAPI(title="视频粗剪助手 API", version="1.0.0", lifespan=lifespan)
@@ -90,6 +129,7 @@ def make_task(task_type: str = "process") -> Dict[str, Any]:
         "error": None,
         "type": task_type,
         "output_path": None,
+        "created_at": time.monotonic(),
     }
 
 
@@ -108,7 +148,7 @@ async def run_process_task(task_id: str, file_path: str):
     try:
         # Step 1: Extract audio
         progress_cb(1.0, "提取音频中...")
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         audio_path = await loop.run_in_executor(None, extract_audio, file_path)
         log.info("[%s] 音频提取完成: %s", task_id[:8], audio_path)
         progress_cb(10.0, "音频提取完成，开始转录...")
@@ -164,7 +204,7 @@ async def run_export_task(task_id: str, file_path: str, segments: List[Dict], ou
         log.debug("[%s] 导出 %.1f%% - %s", task_id[:8], pct, step)
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def do_export():
             export_video(file_path, segments, output_path, progress_cb)
@@ -373,7 +413,7 @@ async def browse_file():
             return None
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         path = await loop.run_in_executor(None, open_dialog_sync)
         return {"path": path}
     except subprocess.TimeoutExpired:

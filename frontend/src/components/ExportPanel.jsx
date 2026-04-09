@@ -40,11 +40,37 @@ export default function ExportPanel({ filePath, segments, onExportDone }) {
     setExportError('')
   }, [filePath])
 
+  useEffect(() => {
+    return () => { if (cancelPollRef.current) cancelPollRef.current() }
+  }, [])
+
   const stats = useMemo(() => {
     if (!segments) return { kept: 0, deleted: 0, keptDuration: 0 }
     const kept = segments.filter(s => s.selected)
     const deleted = segments.filter(s => !s.selected)
-    const keptDuration = kept.reduce((sum, s) => sum + (s.end - s.start), 0)
+    // Compute kept duration using deleted-block boundaries (same logic as exporter/waveform):
+    // cut points are at the edges of consecutive-unselected blocks, so silence gaps adjacent
+    // to deleted content are kept. Mirror the deletedBlocks useMemo in WaveformPlayer.
+    const sorted = [...segments].sort((a, b) => a.start - b.start)
+    const deletedBlocks = []
+    let bStart = null, bEnd = null
+    for (const seg of sorted) {
+      if (!seg.selected) {
+        if (bStart === null) bStart = seg.start
+        bEnd = seg.end
+      } else {
+        if (bStart !== null) { deletedBlocks.push({ start: bStart, end: bEnd }); bStart = bEnd = null }
+      }
+    }
+    if (bStart !== null) deletedBlocks.push({ start: bStart, end: bEnd })
+    const totalEnd = sorted.length > 0 ? sorted[sorted.length - 1].end : 0
+    let keptDuration = 0
+    let prev = 0
+    for (const blk of deletedBlocks) {
+      if (blk.start > prev) keptDuration += blk.start - prev
+      prev = blk.end
+    }
+    if (totalEnd > prev) keptDuration += totalEnd - prev
     return { kept: kept.length, deleted: deleted.length, keptDuration }
   }, [segments])
 

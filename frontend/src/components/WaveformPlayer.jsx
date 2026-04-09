@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useTheme } from '../ThemeContext.js'
 import { WaveformIcon, PlayIcon, PauseIcon } from './Icons.jsx'
 
@@ -20,10 +20,35 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Compute deleted blocks (groups of consecutive unselected segments).
+  // Using useMemo so drawOverlays can depend on it and re-run when it changes.
+  // The block boundaries are what actually gets cut in the export — the silence
+  // gaps between a selected segment and a deleted segment belong to the selected
+  // range and must NOT be colored red.
+  const deletedBlocks = useMemo(() => {
+    const sorted = [...(segments || [])].sort((a, b) => a.start - b.start)
+    const blocks = []
+    let bStart = null, bEnd = null
+    for (const seg of sorted) {
+      if (!seg.selected) {
+        if (bStart === null) bStart = seg.start
+        bEnd = seg.end
+      } else {
+        if (bStart !== null) { blocks.push({ start: bStart, end: bEnd }); bStart = bEnd = null }
+      }
+    }
+    if (bStart !== null) blocks.push({ start: bStart, end: bEnd })
+    return blocks
+  }, [segments])
+
+  // Keep ref in sync for the WaveSurfer timeupdate handler (runs outside React)
+  const deletedBlocksRef = useRef(deletedBlocks)
+  useEffect(() => { deletedBlocksRef.current = deletedBlocks }, [deletedBlocks])
+
   const audioUrl = audioPath ? `/api/audio?path=${encodeURIComponent(audioPath)}` : null
 
   const drawOverlays = useCallback(() => {
-    if (!overlayRef.current || !duration || !segments) return
+    if (!overlayRef.current || !duration) return
     const container = waveformRef.current
     if (!container) return
     const width = container.offsetWidth
@@ -33,16 +58,17 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
     canvas.height = height
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, width, height)
-    segments.forEach((seg) => {
-      if (seg.selected) return
-      const x = (seg.start / duration) * width
-      const w = Math.max(2, ((seg.end - seg.start) / duration) * width)
+    // Draw deleted blocks, not individual segments, so the overlay matches the
+    // export: silence gaps adjacent to deleted content appear as kept (uncolored).
+    deletedBlocks.forEach((block) => {
+      const x = (block.start / duration) * width
+      const w = Math.max(2, ((block.end - block.start) / duration) * width)
       ctx.fillStyle = t.id === 'dark' ? 'rgba(255,69,58,0.18)' : 'rgba(255,59,48,0.12)'
       ctx.fillRect(x, 0, w, height)
       ctx.fillStyle = t.id === 'dark' ? 'rgba(255,69,58,0.55)' : 'rgba(255,59,48,0.5)'
       ctx.fillRect(x, 0, w, 2)
     })
-  }, [segments, duration, t])
+  }, [deletedBlocks, duration, t])
 
   useEffect(() => {
     if (!audioUrl || !waveformRef.current) return
@@ -78,6 +104,16 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
           if (destroyed) return
           setCurrentTime(time)
           if (onTimeUpdate) onTimeUpdate(time)
+          // Skip deleted blocks during playback.
+          // Cut points are at the exact deleted-block boundaries so the natural
+          // silence gaps adjacent to deleted content are played through normally.
+          if (!ws.isPlaying()) return
+          const hit = deletedBlocksRef.current.find(
+            b => time >= b.start && time < b.end
+          )
+          if (hit) {
+            ws.setTime(Math.min(hit.end, ws.getDuration()))
+          }
         })
         ws.on('play', () => !destroyed && setIsPlaying(true))
         ws.on('pause', () => !destroyed && setIsPlaying(false))
@@ -120,16 +156,6 @@ export default function WaveformPlayer({ audioPath, segments, seekTime, onTimeUp
     const pos = Math.max(0, Math.min(seekTime / duration, 1))
     wavesurferRef.current.seekTo(pos)
   }, [seekTime, duration])
-
-  useEffect(() => {
-    if (!isPlaying || !wavesurferRef.current || !segments || !duration) return
-    const deleted = segments.filter(s => !s.selected)
-    const hit = deleted.find(s => currentTime >= s.start && currentTime < s.end)
-    if (hit) {
-      const pos = Math.min(hit.end / duration, 1)
-      wavesurferRef.current.seekTo(pos)
-    }
-  }, [currentTime, isPlaying, segments, duration])
 
   useEffect(() => { drawOverlays() }, [drawOverlays])
   useEffect(() => {

@@ -1,21 +1,30 @@
 import subprocess
-import tempfile
 import os
+import re
 from typing import List, Dict, Any, Callable
 from logger import get_logger
 
 log = get_logger("exporter")
 
 
+def _fmt_time(seconds: float) -> str:
+    m = int(seconds // 60)
+    s = seconds % 60
+    return f"{m}:{s:05.2f}"
+
+
 def export_video(
     video_path: str,
     segments: List[Dict[str, Any]],
     output_path: str,
-    progress_callback: Callable[[float, str], None]
+    progress_callback: Callable[[float, str], None],
 ) -> None:
     """
     Export video with only the selected segments concatenated together.
-    Uses ffmpeg concat demuxer with -c copy (no re-encoding) for speed.
+
+    Uses a single ffmpeg pass with filter_complex (trim + setpts + concat).
+    This produces a seamless output stream with no GOP boundary issues,
+    no timestamp discontinuities, and no intermediate temp files.
 
     Args:
         video_path: Path to the original source video.
@@ -25,119 +34,142 @@ def export_video(
     """
     progress_callback(2.0, "准备导出...")
 
-    # Filter and sort selected segments
-    selected = [s for s in segments if s.get("selected", False)]
-    selected.sort(key=lambda s: s["start"])
+    # Sort ALL segments (selected + unselected) by start time so we can walk
+    # through them in order and detect contiguous selected blocks.
+    all_segs = sorted(segments, key=lambda s: s["start"])
+    selected_count = sum(1 for s in all_segs if s.get("selected", False))
 
-    log.info("导出开始: %d 段已选，输出 → %s", len(selected), output_path)
-    if not selected:
+    if selected_count == 0:
         raise ValueError("没有选中任何片段，无法导出。")
 
-    progress_callback(5.0, "生成片段列表...")
+    # Build deleted blocks (groups of consecutive unselected segments).
+    # Cut points are placed at the boundaries of these blocks, NOT at the
+    # boundaries of selected segments.  This preserves the natural silence gaps
+    # that Whisper's VAD leaves between segments — those gaps would otherwise
+    # be silently cut along with the deleted content.
+    #
+    # Example:
+    #   [sel 2-5s] [gap 5-5.5s] [del 5.5-8s] [gap 8-8.8s] [sel 8.8-12s]
+    #   Old (selected boundaries): keep [2-5s] + [8.8-12s]  ← gaps lost
+    #   New (deleted boundaries):  keep [0-5.5s] + [8-12s]  ← gaps preserved
+    #
+    # Consecutive deleted segments form one block; the silence between them
+    # (which belongs to the deleted section) is removed together with them.
+    deleted_blocks: list = []
+    blk_start = blk_end = None
+    for seg in all_segs:
+        if not seg.get("selected", False):
+            if blk_start is None:
+                blk_start = seg["start"]
+            blk_end = seg["end"]
+        else:
+            if blk_start is not None:
+                deleted_blocks.append((blk_start, blk_end))
+                blk_start = blk_end = None
+    if blk_start is not None:
+        deleted_blocks.append((blk_start, blk_end))
 
-    # Create temp directory for intermediate files
-    tmp_dir = tempfile.mkdtemp(prefix="roughcut_export_")
-    concat_list_path = os.path.join(tmp_dir, "concat.txt")
-    segment_files = []
+    video_end = all_segs[-1]["end"] if all_segs else 0.0
+    if not deleted_blocks:
+        ranges = [(0.0, video_end)]
+    else:
+        ranges = []
+        prev = 0.0
+        for db_start, db_end in deleted_blocks:
+            if db_start > prev + 0.01:
+                ranges.append((prev, db_start))
+            prev = db_end
+        if video_end > prev + 0.01:
+            ranges.append((prev, video_end))
+
+    log.info(
+        "导出开始: %d 段已选，%d 个删除块 → %d 个保留区间，输出 → %s",
+        selected_count, len(deleted_blocks), len(ranges), output_path,
+    )
+
+    progress_callback(5.0, "构建滤镜图...")
+
+    filter_parts = []
+    concat_inputs = []
+    for idx, (s, e) in enumerate(ranges):
+        fs = f"{s:.6f}"
+        fe = f"{e:.6f}"
+        filter_parts.append(
+            f"[0:v]trim=start={fs}:end={fe},setpts=PTS-STARTPTS[v{idx}];"
+            f"[0:a]atrim=start={fs}:end={fe},asetpts=PTS-STARTPTS[a{idx}]"
+        )
+        concat_inputs.append(f"[v{idx}][a{idx}]")
+
+    n = len(ranges)
+    filter_complex = (
+        ";".join(filter_parts)
+        + f";{''.join(concat_inputs)}concat=n={n}:v=1:a=1[vout][aout]"
+    )
+
+    out_dir = os.path.dirname(output_path)
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    total_dur = sum(e - s for s, e in ranges)
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", video_path,
+        "-filter_complex", filter_complex,
+        "-map", "[vout]",
+        "-map", "[aout]",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        output_path,
+    ]
+
+    log.info("执行导出命令 (%d 个区间，总时长 %.1fs)", n, total_dur)
+    progress_callback(8.0, "开始编码...")
 
     try:
-        total_segments = len(selected)
-
-        # Step 1: Extract each selected segment to a separate temp file
-        for idx, seg in enumerate(selected):
-            seg_path = os.path.join(tmp_dir, f"seg_{idx:04d}.mp4")
-            segment_files.append(seg_path)
-
-            start = seg["start"]
-            end = seg["end"]
-            duration = end - start
-
-            # Two-pass seek: coarse input seek (fast) + fine output seek (accurate)
-            pre_roll = 4.0
-            safe_start = max(0.0, start - pre_roll)
-            fine_offset = start - safe_start
-
-            cmd = [
-                "ffmpeg",
-                "-y",
-                "-ss", str(safe_start),   # fast coarse seek via input seek
-                "-i", video_path,
-                "-ss", str(fine_offset),  # accurate fine seek via output seek
-                "-t", str(duration),
-                "-c", "copy",             # no re-encoding
-                "-avoid_negative_ts", "make_zero",
-                seg_path
-            ]
-
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=300
-            )
-            if result.returncode != 0:
-                err = result.stderr.decode("utf-8", errors="replace")
-                log.error("ffmpeg 片段提取失败 (segment %d):\n%s", idx, err)
-                raise RuntimeError(f"ffmpeg segment extraction failed (segment {idx}): {err}")
-
-            pct = 5.0 + (idx + 1) / total_segments * 70.0
-            progress_callback(pct, f"导出中... 片段 {idx + 1}/{total_segments}")
-
-        # Step 2: Build concat list file
-        progress_callback(78.0, "合并片段...")
-        with open(concat_list_path, "w", encoding="utf-8") as f:
-            for seg_path in segment_files:
-                # Escape single quotes in path for ffmpeg concat format
-                escaped = seg_path.replace("'", "'\\''")
-                f.write(f"file '{escaped}'\n")
-
-        # Step 3: Concatenate all segments
-        # Ensure output directory exists
-        out_dir = os.path.dirname(output_path)
-        if out_dir and not os.path.exists(out_dir):
-            os.makedirs(out_dir, exist_ok=True)
-
-        cmd_concat = [
-            "ffmpeg",
-            "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_list_path,
-            "-c", "copy",
-            output_path
-        ]
-
-        result = subprocess.run(
-            cmd_concat,
+        process = subprocess.Popen(
+            cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=600
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            errors="replace",
         )
-        if result.returncode != 0:
-            err = result.stderr.decode("utf-8", errors="replace")
-            log.error("ffmpeg concat 失败:\n%s", err)
-            raise RuntimeError(f"ffmpeg concat failed: {err}")
 
-        log.info("导出成功: %s", output_path)
-        progress_callback(98.0, "导出完成，清理临时文件...")
+        stderr_lines = []
+        for line in process.stdout:
+            line_s = line.rstrip()
+            stderr_lines.append(line_s)
+            log.debug("ffmpeg: %s", line_s)
+            m = re.search(r"time=(\d+):(\d+):([\d.]+)", line)
+            if m and total_dur > 0:
+                encoded = (
+                    int(m.group(1)) * 3600
+                    + int(m.group(2)) * 60
+                    + float(m.group(3))
+                )
+                pct = 8.0 + min(encoded / total_dur, 1.0) * 88.0
+                progress_callback(
+                    pct,
+                    f"编码中... {_fmt_time(encoded)} / {_fmt_time(total_dur)}",
+                )
 
-    finally:
-        # Clean up temp segment files and concat list
-        for seg_path in segment_files:
-            try:
-                if os.path.exists(seg_path):
-                    os.remove(seg_path)
-            except OSError:
-                pass
-        try:
-            if os.path.exists(concat_list_path):
-                os.remove(concat_list_path)
-        except OSError:
-            pass
-        try:
-            if os.path.exists(tmp_dir):
-                os.rmdir(tmp_dir)
-        except OSError:
-            pass
+        process.wait(timeout=3600)
 
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise RuntimeError("导出超时（>60 分钟）")
+
+    if process.returncode != 0:
+        tail = "\n".join(stderr_lines[-30:])
+        log.error("ffmpeg 导出失败 (code=%d):\n%s", process.returncode, tail)
+        raise RuntimeError(
+            f"ffmpeg export failed (code={process.returncode}):\n{tail}"
+        )
+
+    log.info("导出成功: %s", output_path)
     progress_callback(100.0, "导出成功！")

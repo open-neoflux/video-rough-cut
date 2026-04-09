@@ -61,15 +61,26 @@ def detect_duplicates(segments: List[Dict[str, Any]], audio_path: Optional[str] 
 
     # --- Strategy 1: Keyword detection ---
     for i, seg in enumerate(segments):
-        text_lower = seg.get("text", "").lower()
+        text = seg.get("text", "")
+        text_lower = text.lower()
         for kw in NG_KEYWORDS:
-            if kw.lower() in text_lower:
-                seg["is_keyword_marked"] = True
-                if i > 0:
+            kw_lower = kw.lower()
+            if kw_lower not in text_lower:
+                continue
+            seg["is_keyword_marked"] = True
+            # Only mark the preceding segment when the NG keyword appears in the FIRST
+            # half of this segment's text — meaning the bad take was in i-1, and this
+            # segment opens with the retry marker.  If the keyword is in the second half,
+            # the mistake happened inside this segment itself; i-1 is likely good content
+            # and should not be touched.
+            if i > 0:
+                kw_pos = text_lower.find(kw_lower)
+                if kw_pos < len(text_lower) * 0.5:
                     segments[i - 1]["is_keyword_marked"] = True
-                break
+            break
 
-    # --- Strategy 2: Similarity detection ---
+    # --- Strategy 2: Near-duplicate detection (short window) ---
+    # Catches single-sentence re-records that happen close together.
     for i in range(n):
         if segments[i]["is_duplicate"]:
             continue
@@ -84,6 +95,41 @@ def detect_duplicates(segments: List[Dict[str, Any]], audio_path: Optional[str] 
                 segments[i]["is_duplicate"] = True
                 segments[i]["duplicate_of"] = j
                 break
+
+    # --- Strategy 2b: NG-anchor sequence matching ---
+    # Handles the common scenario: speaker records N sentences, says "重来",
+    # then re-records those same N sentences.  Because the two similar sequences
+    # can be far apart (N sentences + NG gap), the short window above misses them.
+    # For each NG anchor we compare segments on both sides and mark each
+    # "before-NG" segment that has a similar counterpart "after-NG" as duplicate.
+    ANCHOR_WINDOW = 20  # look up to this many segments before/after each NG anchor
+    ng_positions = [i for i, s in enumerate(segments) if s.get("is_keyword_marked")]
+
+    for anchor in ng_positions:
+        before_range = range(max(0, anchor - ANCHOR_WINDOW), anchor)
+        after_range  = range(anchor + 1, min(n, anchor + ANCHOR_WINDOW + 1))
+
+        for j in after_range:
+            text_j = segments[j].get("text", "")
+            if not text_j:
+                continue
+            best_ratio, best_i = 0.6, -1   # 0.6 is the similarity threshold
+            for i in before_range:
+                if segments[i].get("is_duplicate"):
+                    continue                # already claimed by a previous match
+                text_i = segments[i].get("text", "")
+                if not text_i:
+                    continue
+                ratio = difflib.SequenceMatcher(None, text_i, text_j).ratio()
+                if ratio > best_ratio:
+                    best_ratio, best_i = ratio, i
+            if best_i >= 0:
+                segments[best_i]["is_duplicate"] = True
+                segments[best_i]["duplicate_of"] = j
+                log.debug(
+                    "NG锚点[%d] 匹配到重复片段: seg[%d] ≈ seg[%d] (%.2f)",
+                    anchor, best_i, j, best_ratio,
+                )
 
     # --- Strategy 3: Silence detection via ffmpeg ---
     silence_inserts = []
